@@ -4,6 +4,8 @@ package io.prometheus.client;
 import io.prometheus.client.exemplars.Exemplar;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -17,10 +19,63 @@ import java.util.regex.Pattern;
  * @see <a href="http://prometheus.io/docs/instrumenting/exposition_formats/">Exposition formats</a>.
  */
 public abstract class Collector {
+
   /**
-   * Return all of the metrics of this Collector.
+   * Return all metrics of this Collector.
    */
   public abstract List<MetricFamilySamples> collect();
+
+  /**
+   * Return only metrics where the name does not start with one of the given prefixes.
+   * <p>
+   * This is final because collector implementations should override {@link #collectExcluding(Collection)} instead.
+   */
+  public final List<MetricFamilySamples> collectExcluding(String... prefixes) {
+    return collectExcluding(Arrays.asList(prefixes));
+  }
+
+  /**
+   * Return only metrics where the name does not start with one of the given prefixes.
+   * <p>
+   * The default implementation first collects all metrics and then discards the ones starting with
+   * one of the prefixes. To improve performance, collector implementations should override this
+   * method to prevent excluded metrics from being collected.
+   *
+   * @param prefixes may be {@code null}, indicating that all metrics should be collected.
+   */
+  public List<MetricFamilySamples> collectExcluding(Collection<String> prefixes) {
+    List<MetricFamilySamples> all = collect();
+    if (prefixes == null || prefixes.isEmpty()) {
+      return all;
+    }
+    List<MetricFamilySamples> remaining = new ArrayList<MetricFamilySamples>(all.size());
+    for (MetricFamilySamples mfs : all) {
+      if (noPrefixMatches(mfs.name, prefixes)) {
+        remaining.add(mfs);
+      }
+    }
+    return remaining;
+  }
+
+  /**
+   * Test if the name starts with any of the prefixes.
+   * @param name a metric name
+   * @param prefixes may be {@code null}
+   * @return {@code true} if prefixes is null or if the name does not start with any of the prefixes.
+   *         {@code false} otherwise.
+   */
+  protected boolean noPrefixMatches(String name, Collection<String> prefixes) {
+    if (prefixes == null || prefixes.isEmpty()) {
+      return true;
+    }
+    for (String prefix : prefixes) {
+      if (name.startsWith(prefix)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   public enum Type {
     UNKNOWN, // This is untyped in Prometheus text format.
     COUNTER,

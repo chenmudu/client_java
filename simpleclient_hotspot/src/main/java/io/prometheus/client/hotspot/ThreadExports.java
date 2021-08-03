@@ -7,11 +7,7 @@ import io.prometheus.client.GaugeMetricFamily;
 import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadInfo;
 import java.lang.management.ThreadMXBean;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * Exports metrics about JVM thread areas.
@@ -31,6 +27,15 @@ import java.util.Map;
  * </pre>
  */
 public class ThreadExports extends Collector {
+
+  private static final String JVM_THREADS_CURRENT = "jvm_threads_current";
+  private static final String JVM_THREADS_DAEMON = "jvm_threads_daemon";
+  private static final String JVM_THREADS_PEAK = "jvm_threads_peak";
+  private static final String JVM_THREADS_STARTED_TOTAL = "jvm_threads_started_total";
+  private static final String JVM_THREADS_DEADLOCKED = "jvm_threads_deadlocked";
+  private static final String JVM_THREADS_DEADLOCKED_MONITOR = "jvm_threads_deadlocked_monitor";
+  private static final String JVM_THREADS_STATE = "jvm_threads_state";
+
   private final ThreadMXBean threadBean;
 
   public ThreadExports() {
@@ -41,56 +46,70 @@ public class ThreadExports extends Collector {
     this.threadBean = threadBean;
   }
 
-  void addThreadMetrics(List<MetricFamilySamples> sampleFamilies) {
-    sampleFamilies.add(
-        new GaugeMetricFamily(
-          "jvm_threads_current",
-          "Current thread count of a JVM",
-          threadBean.getThreadCount()));
-
-    sampleFamilies.add(
-        new GaugeMetricFamily(
-          "jvm_threads_daemon",
-          "Daemon thread count of a JVM",
-          threadBean.getDaemonThreadCount()));
-
-    sampleFamilies.add(
-        new GaugeMetricFamily(
-          "jvm_threads_peak",
-          "Peak thread count of a JVM",
-          threadBean.getPeakThreadCount()));
-
-    sampleFamilies.add(
-        new CounterMetricFamily(
-          "jvm_threads_started_total",
-          "Started thread count of a JVM",
-          threadBean.getTotalStartedThreadCount()));
-
-    sampleFamilies.add(
-        new GaugeMetricFamily(
-        "jvm_threads_deadlocked",
-        "Cycles of JVM-threads that are in deadlock waiting to acquire object monitors or ownable synchronizers",
-        nullSafeArrayLength(threadBean.findDeadlockedThreads())));
-
-    sampleFamilies.add(
-        new GaugeMetricFamily(
-        "jvm_threads_deadlocked_monitor",
-        "Cycles of JVM-threads that are in deadlock waiting to acquire object monitors",
-        nullSafeArrayLength(threadBean.findMonitorDeadlockedThreads())));
-
-    GaugeMetricFamily threadStateFamily = new GaugeMetricFamily(
-      "jvm_threads_state",
-      "Current count of threads by state",
-      Collections.singletonList("state"));
-
-    Map<Thread.State, Integer> threadStateCounts = getThreadStateCountMap();
-    for (Map.Entry<Thread.State, Integer> entry : threadStateCounts.entrySet()) {
-      threadStateFamily.addMetric(
-        Collections.singletonList(entry.getKey().toString()),
-        entry.getValue()
-      );
+  void addThreadMetrics(List<MetricFamilySamples> sampleFamilies, Collection<String> excludedPrefixes) {
+    if (noPrefixMatches(JVM_THREADS_CURRENT, excludedPrefixes)) {
+      sampleFamilies.add(
+              new GaugeMetricFamily(
+                      JVM_THREADS_CURRENT,
+                      "Current thread count of a JVM",
+                      threadBean.getThreadCount()));
     }
-    sampleFamilies.add(threadStateFamily);
+
+    if (noPrefixMatches(JVM_THREADS_DAEMON, excludedPrefixes)) {
+      sampleFamilies.add(
+              new GaugeMetricFamily(
+                      JVM_THREADS_DAEMON,
+                      "Daemon thread count of a JVM",
+                      threadBean.getDaemonThreadCount()));
+    }
+
+    if (noPrefixMatches(JVM_THREADS_PEAK, excludedPrefixes)) {
+      sampleFamilies.add(
+              new GaugeMetricFamily(
+                      JVM_THREADS_PEAK,
+                      "Peak thread count of a JVM",
+                      threadBean.getPeakThreadCount()));
+    }
+
+    if (noPrefixMatches(JVM_THREADS_STARTED_TOTAL, excludedPrefixes)) {
+      sampleFamilies.add(
+              new CounterMetricFamily(
+                      JVM_THREADS_STARTED_TOTAL,
+                      "Started thread count of a JVM",
+                      threadBean.getTotalStartedThreadCount()));
+    }
+
+    if (noPrefixMatches(JVM_THREADS_DEADLOCKED, excludedPrefixes)) {
+      sampleFamilies.add(
+              new GaugeMetricFamily(
+                      JVM_THREADS_DEADLOCKED,
+                      "Cycles of JVM-threads that are in deadlock waiting to acquire object monitors or ownable synchronizers",
+                      nullSafeArrayLength(threadBean.findDeadlockedThreads())));
+    }
+
+    if (noPrefixMatches(JVM_THREADS_DEADLOCKED_MONITOR, excludedPrefixes)) {
+      sampleFamilies.add(
+              new GaugeMetricFamily(
+                      JVM_THREADS_DEADLOCKED_MONITOR,
+                      "Cycles of JVM-threads that are in deadlock waiting to acquire object monitors",
+                      nullSafeArrayLength(threadBean.findMonitorDeadlockedThreads())));
+    }
+
+    if (noPrefixMatches(JVM_THREADS_STATE, excludedPrefixes)) {
+      GaugeMetricFamily threadStateFamily = new GaugeMetricFamily(
+              JVM_THREADS_STATE,
+              "Current count of threads by state",
+              Collections.singletonList("state"));
+
+      Map<Thread.State, Integer> threadStateCounts = getThreadStateCountMap();
+      for (Map.Entry<Thread.State, Integer> entry : threadStateCounts.entrySet()) {
+        threadStateFamily.addMetric(
+                Collections.singletonList(entry.getKey().toString()),
+                entry.getValue()
+        );
+      }
+      sampleFamilies.add(threadStateFamily);
+    }
   }
 
   private Map<Thread.State, Integer> getThreadStateCountMap() {
@@ -118,9 +137,15 @@ public class ThreadExports extends Collector {
     return null == array ? 0 : array.length;
   }
 
+  @Override
   public List<MetricFamilySamples> collect() {
+    return collectExcluding((Collection<String>) null);
+  }
+
+  @Override
+  public List<MetricFamilySamples> collectExcluding(Collection<String> prefixes) {
     List<MetricFamilySamples> mfs = new ArrayList<MetricFamilySamples>();
-    addThreadMetrics(mfs);
+    addThreadMetrics(mfs, prefixes);
     return mfs;
   }
 }
